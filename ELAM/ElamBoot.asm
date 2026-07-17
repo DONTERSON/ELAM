@@ -6,7 +6,6 @@ include "kdprint.inc"
 include 'information.inc'
 include "blacklist.inc"
 
-
 importlib ntoskrnl,\
     IoCreateDevice,\
     IoCreateSymbolicLink,\
@@ -41,18 +40,20 @@ importlib cng,\
     BCryptDestroyKey
 
 struct BOOT_ELAM_INFORMATION_FUNCTION
-    REGISTER_ELAM_CALLBACK   dm this::static
-    INIT_CNG_FUNCTIONS       dm this::static 
-    VerifyTrustSignature     dm this::static
-    IsHashKnownBad           dm this::static
-    IsPublisherTrusted       dm this::static
-    IsNameBlocked            dm this::static
-    ProcessInitializeImage   dm this::static
-    ProcessStatusUpdate      dm this::static
-    ElamCallbackRoutine      dm this::static
-    CreateCloseHandler       dm this::static
-    IoControlHandler         dm this::static
+    REGISTER_ELAM_CALLBACK   dm this
+    INIT_CNG_FUNCTIONS       dm this 
+    VerifyTrustSignature     dm this
+    IsHashKnownBad           dm this
+    IsPublisherTrusted       dm this
+    IsNameBlocked            dm this
+    ProcessInitializeImage   dm this
+    ProcessStatusUpdate      dm this
+    ElamCallbackRoutine      dm this
+    CreateCloseHandler       dm this
+    IoControlHandler         dm this
+    rb 1  
 ends
+
 
 entry DriverEntry
 
@@ -94,7 +95,7 @@ entry DriverEntry
     MOV    pax, BOOT_ELAM_INFORMATION_FUNCTION.IoControlHandler
     MOV    [pcx + DRIVER_OBJECT.MajorFunction + IRP_MJ_DEVICE_CONTROL * 8], pax
 
-    MOV    pax, BOOT_ELAM_INFORMATION_FUNCTION.DriverUnload
+    MOV    pax, DriverUnload
     MOV    [pcx + DRIVER_OBJECT.DriverUnload], pax
 
     $call  [RtlInitUnicodeString](addr TrustedPub0, addr TrustedPub0Str)
@@ -118,7 +119,7 @@ entry DriverEntry
     MOV    pax, [pDeviceObject]
     AND    DWORD [pax + DEVICE_OBJECT.Flags], NOT DO_DEVICE_INITIALIZING
 
-    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION.REGISTER_ELAM_CALLBACK()
+    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION|REGISTER_ELAM_CALLBACK()
     TEST   eax, eax
     JS     .ERR_LINK_FAILED
 
@@ -137,16 +138,16 @@ entry DriverEntry
 
 .proc BOOT_ELAM_INFORMATION_FUNCTION.REGISTER_ELAM_CALLBACK
     kdprint "registering callback..."
-    $call  pax = [IoRegisterBootDriverCallback](addr ElamCallbackRoutine, 0)
+    $call  pax = [IoRegisterBootDriverCallback](addr BOOT_ELAM_INFORMATION_FUNCTION.ElamCallbackRoutine, 0)
     MOV    [ElamCallbackHandle], pax
     TEST   pax, pax
     JZ     .REGISTRATION_FAILED
 
-    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION.INIT_CNG_FUNCTIONS()
+    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION|INIT_CNG_FUNCTIONS()
     TEST   eax, eax
     JS     .REGISTRATION_EXIT
 
-    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION.VerifyTrustSignature()
+    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION|VerifyTrustSignature()
 
 .REGISTRATION_EXIT:
     RET
@@ -286,7 +287,6 @@ entry DriverEntry
     RET
 .endp
 
-
 .proc BOOT_ELAM_INFORMATION_FUNCTION.IsNameBlocked(.pImageName)
     $call  eax = [RtlCompareUnicodeString]([.pImageName], addr BlockedName0, 1)
     TEST   eax, eax
@@ -311,7 +311,7 @@ entry DriverEntry
     kdprint "checking file: %wZ", [.info.ImageName]
 
     MOV    pdx, [.info.ImageName]
-    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION.IsNameBlocked(pdx)
+    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION|IsNameBlocked(pdx)
     TEST   eax, eax
     JNZ    .INIT_SET_BAD
 
@@ -321,7 +321,7 @@ entry DriverEntry
 
     LEA    pax, [.info.ImageHash]
     MOV    ecx, [.info.ImageHashLength]
-    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION.IsHashKnownBad(pax, ecx)
+    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION|IsHashKnownBad(pax, ecx)
     TEST   eax, eax
     JNZ    .INIT_SET_BAD
 
@@ -368,12 +368,12 @@ entry DriverEntry
 
 .ELAM_CASE_INIT:
     MOV    pcx, [.CallbackInfo]
-    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION.ProcessInitializeImage(pcx)
+    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION|ProcessInitializeImage(pcx)
     $return
 
 .ELAM_CASE_STATUS:
     MOV    pcx, [.CallbackInfo]
-    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION.ProcessStatusUpdate(pcx)
+    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION|ProcessStatusUpdate(pcx)
     $return
 .endp
 
