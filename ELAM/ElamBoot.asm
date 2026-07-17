@@ -40,6 +40,20 @@ importlib cng,\
     BCryptImportKeyPair,\
     BCryptDestroyKey
 
+struct BOOT_ELAM_INFORMATION_FUNCTION
+    REGISTER_ELAM_CALLBACK   dm this::static
+    INIT_CNG_FUNCTIONS       dm this::static 
+    VerifyTrustSignature     dm this::static
+    IsHashKnownBad           dm this::static
+    IsPublisherTrusted       dm this::static
+    IsNameBlocked            dm this::static
+    ProcessInitializeImage   dm this::static
+    ProcessStatusUpdate      dm this::static
+    ElamCallbackRoutine      dm this::static
+    CreateCloseHandler       dm this::static
+    IoControlHandler         dm this::static
+ends
+
 entry DriverEntry
 
 .proc DriverUnload(.DriverObject)
@@ -72,15 +86,15 @@ entry DriverEntry
 
 .proc DriverEntry(.DriverObject, .RegistryPath)
     kdprint "driver entry start..."
-    MOV    pax, CreateCloseHandler
+    MOV    pax, BOOT_ELAM_INFORMATION_FUNCTION.CreateCloseHandler
     MOV    pcx, [.DriverObject]
     MOV    [pcx + DRIVER_OBJECT.MajorFunction + IRP_MJ_CREATE * 8], pax
     MOV    [pcx + DRIVER_OBJECT.MajorFunction + IRP_MJ_CLOSE * 8], pax
 
-    MOV    pax, IoControlHandler
+    MOV    pax, BOOT_ELAM_INFORMATION_FUNCTION.IoControlHandler
     MOV    [pcx + DRIVER_OBJECT.MajorFunction + IRP_MJ_DEVICE_CONTROL * 8], pax
 
-    MOV    pax, DriverUnload
+    MOV    pax, BOOT_ELAM_INFORMATION_FUNCTION.DriverUnload
     MOV    [pcx + DRIVER_OBJECT.DriverUnload], pax
 
     $call  [RtlInitUnicodeString](addr TrustedPub0, addr TrustedPub0Str)
@@ -104,7 +118,7 @@ entry DriverEntry
     MOV    pax, [pDeviceObject]
     AND    DWORD [pax + DEVICE_OBJECT.Flags], NOT DO_DEVICE_INITIALIZING
 
-    $call  eax = REGISTER_ELAM_CALLBACK()
+    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION.REGISTER_ELAM_CALLBACK()
     TEST   eax, eax
     JS     .ERR_LINK_FAILED
 
@@ -121,18 +135,18 @@ entry DriverEntry
 .endp
 
 
-.proc REGISTER_ELAM_CALLBACK
+.proc BOOT_ELAM_INFORMATION_FUNCTION.REGISTER_ELAM_CALLBACK
     kdprint "registering callback..."
     $call  pax = [IoRegisterBootDriverCallback](addr ElamCallbackRoutine, 0)
     MOV    [ElamCallbackHandle], pax
     TEST   pax, pax
     JZ     .REGISTRATION_FAILED
 
-    $call  eax = INIT_CNG_FUNCTIONS()
+    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION.INIT_CNG_FUNCTIONS()
     TEST   eax, eax
     JS     .REGISTRATION_EXIT
 
-    $call  eax = VerifyTrustSignature()
+    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION.VerifyTrustSignature()
 
 .REGISTRATION_EXIT:
     RET
@@ -144,7 +158,7 @@ entry DriverEntry
 .endp
 
 
-.proc INIT_CNG_FUNCTIONS
+.proc BOOT_ELAM_INFORMATION_FUNCTION.INIT_CNG_FUNCTIONS
     kdprint "initialize crypto provider..."
     $call  eax = [BCryptOpenAlgorithmProvider](addr hAlgProvider, addr AlgSha256, 0, 0)
     TEST   eax, eax
@@ -155,7 +169,7 @@ entry DriverEntry
 .endp
 
 
-.proc VerifyTrustSignature
+.proc BOOT_ELAM_INFORMATION_FUNCTION.VerifyTrustSignature
     kdprint "verifying trust manifest signature..."
 
     $call  eax = [BCryptOpenAlgorithmProvider](addr hRsaAlgProvider, addr AlgRSA, 0, 0)
@@ -219,7 +233,7 @@ entry DriverEntry
 .endp
 
 
-.proc IsHashKnownBad(.pHash, .HashLen)
+.proc BOOT_ELAM_INFORMATION_FUNCTION.IsHashKnownBad(.pHash, .HashLen)
     MOV    pax, [.HashLen]
     CMP    eax, HASH_SIZE
     JNE    .HASH_MISMATCH
@@ -255,7 +269,7 @@ entry DriverEntry
 .endp
 
 
-.proc IsPublisherTrusted(.pPublisher)
+.proc BOOT_ELAM_INFORMATION_FUNCTION.IsPublisherTrusted(.pPublisher)
     $call  eax = [RtlCompareUnicodeString]([.pPublisher], addr TrustedPub0, 1)
     TEST   eax, eax
     JZ     .PUBLISHER_TRUSTED
@@ -273,7 +287,7 @@ entry DriverEntry
 .endp
 
 
-.proc IsNameBlocked(.pImageName)
+.proc BOOT_ELAM_INFORMATION_FUNCTION.IsNameBlocked(.pImageName)
     $call  eax = [RtlCompareUnicodeString]([.pImageName], addr BlockedName0, 1)
     TEST   eax, eax
     JZ     .NAME_BLOCKED
@@ -291,13 +305,13 @@ entry DriverEntry
 .endp
 
 
-.proc ProcessInitializeImage(.pImageInfo)
+.proc BOOT_ELAM_INFORMATION_FUNCTION.ProcessInitializeImage(.pImageInfo)
     virtObj .info BDCB_IMAGE_INFORMATION at pcx from [.pImageInfo]
 
     kdprint "checking file: %wZ", [.info.ImageName]
 
     MOV    pdx, [.info.ImageName]
-    $call  eax = IsNameBlocked(pdx)
+    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION.IsNameBlocked(pdx)
     TEST   eax, eax
     JNZ    .INIT_SET_BAD
 
@@ -305,18 +319,11 @@ entry DriverEntry
     CMP    eax, CALG_SHA_256
     JNE    .INIT_SET_UNKNOWN
 
-    MOV    pdx, [.info.ImageHash]
+    LEA    pax, [.info.ImageHash]
     MOV    ecx, [.info.ImageHashLength]
-    $call  eax = IsHashKnownBad(pdx, ecx)
+    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION.IsHashKnownBad(pax, ecx)
     TEST   eax, eax
     JNZ    .INIT_SET_BAD
-
-    MOV    pdx, [.info.CertificatePublisher]
-    TEST   pdx, pdx
-    JZ     .INIT_SET_UNKNOWN
-    $call  eax = IsPublisherTrusted(pdx)
-    TEST   eax, eax
-    JZ     .INIT_SET_UNKNOWN
 
     kdprint "file clean: %wZ", [.info.ImageName]
     MOV    DWORD [.info.Classification], BDCB_CLASS_GOOD
@@ -340,14 +347,14 @@ entry DriverEntry
 .endp
 
 
-.proc ProcessStatusUpdate(.pStatusInfo)
+.proc BOOT_ELAM_INFORMATION_FUNCTION.ProcessStatusUpdate(.pStatusInfo)
     kdprint "got status update event"
     XOR    eax, eax
     $return
 .endp
 
 
-.proc ElamCallbackRoutine(.CallbackContext, .CallbackType, .CallbackInfo)
+.proc BOOT_ELAM_INFORMATION_FUNCTION.ElamCallbackRoutine(.CallbackContext, .CallbackType, .CallbackInfo)
     MOV    pax, [.CallbackType]
     CMP    eax, BDCB_INITIALIZEIMAGE_TYPE
     JE     .ELAM_CASE_INIT
@@ -361,17 +368,17 @@ entry DriverEntry
 
 .ELAM_CASE_INIT:
     MOV    pcx, [.CallbackInfo]
-    $call  eax = ProcessInitializeImage(pcx)
+    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION.ProcessInitializeImage(pcx)
     $return
 
 .ELAM_CASE_STATUS:
     MOV    pcx, [.CallbackInfo]
-    $call  eax = ProcessStatusUpdate(pcx)
+    $call  eax = BOOT_ELAM_INFORMATION_FUNCTION.ProcessStatusUpdate(pcx)
     $return
 .endp
 
 
-.proc CreateCloseHandler(.DeviceObject, .Irp)
+.proc BOOT_ELAM_INFORMATION_FUNCTION.CreateCloseHandler(.DeviceObject, .Irp)
     kdprint "create close hit"
     MOV    pcx, [.Irp]
     XOR    eax, eax
@@ -383,7 +390,7 @@ entry DriverEntry
 .endp
 
 
-.proc IoControlHandler(.DeviceObject, .Irp)
+.proc BOOT_ELAM_INFORMATION_FUNCTION.IoControlHandler(.DeviceObject, .Irp)
     $call  pax = [IoGetCurrentIrpStackLocation]([.Irp])
     MOV    ecx, [pax + IO_STACK_LOCATION.Parameters + DEVICE_IO_CONTROL.IoControlCode]
 
